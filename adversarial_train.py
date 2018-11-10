@@ -139,64 +139,8 @@ if __name__ == '__main__':
         model = DeepSpeech.load_model_package(package)
         labels = DeepSpeech.get_labels(model)
         audio_conf = DeepSpeech.get_audio_conf(model)
-        # parameters = model.parameters()
-        # optimizer = torch.optim.SGD(parameters, lr=args.lr,
-        #                             momentum=args.momentum, nesterov=True)
-        # optimizer.load_state_dict(package['optim_dict'])
-        # start_epoch = int(package.get('epoch', 1)) - 1  # Index start at 0 for training
-        # start_iter = package.get('iteration', None)
-        # if start_iter is None:
         start_epoch = 0
         start_iter = 0
-        # avg_loss = int(package.get('avg_loss', 0))
-        # loss_results, cer_results, wer_results = package['loss_results'], package[
-        #     'cer_results'], package['wer_results']
-        # if args.visdom and \
-        #                 package[
-        #                     'loss_results'] is not None and start_epoch > 0:  # Add previous scores to visdom graph
-        #     x_axis = epochs[0:start_epoch]
-        #     y_axis = torch.stack(
-        #         (loss_results[0:start_epoch], wer_results[0:start_epoch], cer_results[0:start_epoch]),
-        #         dim=1)
-        #     viz_window = viz.line(
-        #         X=x_axis,
-        #         Y=y_axis,
-        #         opts=opts,
-        #     )
-        # if args.tensorboard and \
-        #                 package[
-        #                     'loss_results'] is not None and start_epoch > 0:  # Previous scores to tensorboard logs
-        #     for i in range(start_epoch):
-        #         values = {
-        #             'Avg Train Loss': loss_results[i],
-        #             'Avg WER': wer_results[i],
-        #             'Avg CER': cer_results[i]
-        #         }
-        #         tensorboard_writer.add_scalars(args.id, values, i + 1)
-    else:
-        raise Exception('Must load a model to be attacked')
-    #     with open(args.labels_path) as label_file:
-    #         labels = str(''.join(json.load(label_file)))
-    #
-    #     audio_conf = dict(sample_rate=args.sample_rate,
-    #                       window_size=args.window_size,
-    #                       window_stride=args.window_stride,
-    #                       window=args.window,
-    #                       noise_dir=args.noise_dir,
-    #                       noise_prob=args.noise_prob,
-    #                       noise_levels=(args.noise_min, args.noise_max))
-    #
-    #     rnn_type = args.rnn_type.lower()
-    #     assert rnn_type in supported_rnns, "rnn_type should be either lstm, rnn or gru"
-    #     model = DeepSpeech(rnn_hidden_size=args.hidden_size,
-    #                        nb_layers=args.hidden_layers,
-    #                        labels=labels,
-    #                        rnn_type=supported_rnns[rnn_type],
-    #                        audio_conf=audio_conf,
-    #                        bidirectional=args.bidirectional)
-    #     parameters = model.parameters()
-    #     optimizer = torch.optim.SGD(parameters, lr=args.lr,
-    #                                 momentum=args.momentum, nesterov=True)
 
     decoder = GreedyDecoder(labels)
     train_dataset = SpectrogramDataset(audio_conf=audio_conf, manifest_filepath=args.train_manifest, labels=labels,
@@ -280,8 +224,8 @@ if __name__ == '__main__':
             optimizer.zero_grad()
             loss.backward(retain_graph=True)
 
+            # optimizer step
             torch.nn.utils.clip_grad_norm(model.parameters(), args.max_norm)
-            # SGD step
             optimizer.step()
 
             # clip to norm
