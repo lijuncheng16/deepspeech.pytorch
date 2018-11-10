@@ -105,7 +105,7 @@ class BeamCTCDecoder(Decoder):
             for p, utt in enumerate(batch):
                 size = seq_len[b][p]
                 if size > 0:
-                    transcript = ''.join(map(lambda x: self.int_to_char[x.item()], utt[0:size]))
+                    transcript = ''.join(map(lambda x: self.int_to_char[x], utt[0:size]))
                 else:
                     transcript = ''
                 utterances.append(transcript)
@@ -121,7 +121,7 @@ class BeamCTCDecoder(Decoder):
                 if sizes[b][p] > 0:
                     utterances.append(utt[0:size])
                 else:
-                    utterances.append(torch.tensor([], dtype=torch.int))
+                    utterances.append(torch.IntTensor())
             results.append(utterances)
         return results
 
@@ -135,8 +135,8 @@ class BeamCTCDecoder(Decoder):
         Returns:
             string: sequences of the model's best guess for the transcription
         """
-        probs = probs.cpu()
-        out, scores, offsets, seq_lens = self._decoder.decode(probs, sizes)
+        probs = probs.cpu().transpose(0, 1).contiguous()
+        out, scores, offsets, seq_lens = self._decoder.decode(probs)
 
         strings = self.convert_to_strings(out, seq_lens)
         offsets = self.convert_tensor(offsets, seq_lens)
@@ -166,10 +166,10 @@ class GreedyDecoder(Decoder):
         string = ''
         offsets = []
         for i in range(size):
-            char = self.int_to_char[sequence[i].item()]
+            char = self.int_to_char[int(sequence[i])]
             if char != self.int_to_char[self.blank_index]:
                 # if this char is a repetition and remove_repetitions=true, then skip
-                if remove_repetitions and i != 0 and char == self.int_to_char[sequence[i - 1].item()]:
+                if remove_repetitions and i != 0 and char == self.int_to_char[int(sequence[i - 1])]:
                     pass
                 elif char == self.labels[self.space_index]:
                     string += ' '
@@ -177,7 +177,7 @@ class GreedyDecoder(Decoder):
                 else:
                     string = string + char
                     offsets.append(i)
-        return string, torch.tensor(offsets, dtype=torch.int)
+        return string, torch.IntTensor(offsets)
 
     def decode(self, probs, sizes=None):
         """
@@ -185,13 +185,13 @@ class GreedyDecoder(Decoder):
         repeated elements in the sequence, as well as blanks.
 
         Arguments:
-            probs: Tensor of character probabilities from the network. Expected shape of batch x seq_length x output_dim
+            probs: Tensor of character probabilities from the network. Expected shape of seq_length x batch x output_dim
             sizes(optional): Size of each sequence in the mini-batch
         Returns:
             strings: sequences of the model's best guess for the transcription on inputs
             offsets: time step per character predicted
         """
-        _, max_probs = torch.max(probs, 2)
+        _, max_probs = torch.max(probs.transpose(0, 1), 2)
         strings, offsets = self.convert_to_strings(max_probs.view(max_probs.size(0), max_probs.size(1)), sizes,
                                                    remove_repetitions=True, return_offsets=True)
         return strings, offsets

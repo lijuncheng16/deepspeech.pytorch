@@ -1,13 +1,11 @@
 import argparse
 import warnings
 
-from opts import add_decoder_args, add_inference_args
-
 warnings.simplefilter('ignore')
 
 from decoder import GreedyDecoder
 
-import torch
+from torch.autograd import Variable
 
 from data.data_loader import SpectrogramParser
 from model import DeepSpeech
@@ -15,20 +13,36 @@ import os.path
 import json
 
 parser = argparse.ArgumentParser(description='DeepSpeech transcription')
-parser = add_inference_args(parser)
-parser.add_argument('--audio-path', default='audio.wav',
+parser.add_argument('--model_path', default='models/deepspeech_final.pth.tar',
+                    help='Path to model file created by training')
+parser.add_argument('--audio_path', default='audio.wav',
                     help='Audio file to predict on')
+parser.add_argument('--cuda', action="store_true", help='Use cuda to test model')
+parser.add_argument('--decoder', default="greedy", choices=["greedy", "beam"], type=str, help="Decoder to use")
 parser.add_argument('--offsets', dest='offsets', action='store_true', help='Returns time offset information')
-parser = add_decoder_args(parser)
+beam_args = parser.add_argument_group("Beam Decode Options", "Configurations options for the CTC Beam Search decoder")
+beam_args.add_argument('--top_paths', default=1, type=int, help='number of beams to return')
+beam_args.add_argument('--beam_width', default=10, type=int, help='Beam width to use')
+beam_args.add_argument('--lm_path', default=None, type=str,
+                       help='Path to an (optional) kenlm language model for use with beam search (req\'d with trie)')
+beam_args.add_argument('--alpha', default=0.8, type=float, help='Language model weight')
+beam_args.add_argument('--beta', default=1, type=float, help='Language model word bonus (all words)')
+beam_args.add_argument('--cutoff_top_n', default=40, type=int,
+                       help='Cutoff number in pruning, only top cutoff_top_n characters with highest probs in '
+                            'vocabulary will be used in beam search, default 40.')
+beam_args.add_argument('--cutoff_prob', default=1.0, type=float,
+                       help='Cutoff probability in pruning,default 1.0, no pruning.')
+beam_args.add_argument('--lm_workers', default=1, type=int, help='Number of LM processes to use')
 args = parser.parse_args()
 
 
-def decode_results(model, decoded_output, decoded_offsets):
+def decode_results(decoded_output, decoded_offsets):
     results = {
         "output": [],
         "_meta": {
             "acoustic_model": {
-                "name": os.path.basename(args.model_path)
+                "name": os.path.basename(args.model_path),
+                **DeepSpeech.get_meta(model)
             },
             "language_model": {
                 "name": os.path.basename(args.lm_path) if args.lm_path else None,
@@ -41,33 +55,18 @@ def decode_results(model, decoded_output, decoded_offsets):
             }
         }
     }
-    results['_meta']['acoustic_model'].update(DeepSpeech.get_meta(model))
 
     for b in range(len(decoded_output)):
         for pi in range(min(args.top_paths, len(decoded_output[b]))):
             result = {'transcription': decoded_output[b][pi]}
             if args.offsets:
-                result['offsets'] = decoded_offsets[b][pi].tolist()
+                result['offsets'] = decoded_offsets[b][pi]
             results['output'].append(result)
     return results
 
 
-def transcribe(audio_path, parser, model, decoder, cuda=False):
-    spect = parser.parse_audio(audio_path).contiguous()
-    spect = spect.view(1, 1, spect.size(0), spect.size(1))
-    if cuda:
-        spect = spect.cuda()
-    input_sizes = torch.IntTensor([spect.size(3)]).int()
-    out, output_sizes = model(spect, input_sizes)
-    decoded_output, decoded_offsets = decoder.decode(out, output_sizes)
-    return decoded_output, decoded_offsets
-
-
 if __name__ == '__main__':
-    torch.set_grad_enabled(False)
-    model = DeepSpeech.load_model(args.model_path)
-    if args.cuda:
-        model.cuda()
+    model = DeepSpeech.load_model(args.model_path, cuda=args.cuda)
     model.eval()
 
     labels = DeepSpeech.get_labels(model)
@@ -84,5 +83,9 @@ if __name__ == '__main__':
 
     parser = SpectrogramParser(audio_conf, normalize=True)
 
-    decoded_output, decoded_offsets = transcribe(args.audio_path, parser, model, decoder, args.cuda)
-    print(json.dumps(decode_results(model, decoded_output, decoded_offsets)))
+    spect = parser.parse_audio(args.audio_path).contiguous()
+    spect = spect.view(1, 1, spect.size(0), spect.size(1))
+    out = model(Variable(spect, volatile=True))
+    out = out.transpose(0, 1)  # TxNxH
+    decoded_output, decoded_offsets = decoder.decode(out.data)
+    print(json.dumps(decode_results(decoded_output, decoded_offsets)))
